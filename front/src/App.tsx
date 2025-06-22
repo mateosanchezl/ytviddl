@@ -508,7 +508,13 @@ function App() {
                 color: "#cccccc",
               }}
             >
-              downloaded videos
+              {videos.length} downloaded videos
+              <span style={{ color: "#666666", fontSize: "12px", marginLeft: "8px" }}>
+                {videos.reduce((acc, video) => acc + video.size_mb, 0) > 1000
+                  ? (videos.reduce((acc, video) => acc + video.size_mb, 0) / 1000).toFixed(2) +
+                    " gb"
+                  : videos.reduce((acc, video) => acc + video.size_mb, 0).toFixed(2) + " mb"}
+              </span>
             </h3>
             <button
               onClick={fetchVideos}

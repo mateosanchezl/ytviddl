@@ -90,10 +90,10 @@ print_success "Prerequisites check completed"
 # Check if ports are available
 print_status "Checking port availability..."
 
-if port_in_use 5000; then
-    print_error "Port 5000 is already in use. Please stop the service using this port and try again."
-    exit 1
-fi
+# if port_in_use 5000; then
+#     print_error "Port 5000 is already in use. Please stop the service using this port and try again."
+#     exit 1
+# fi
 
 if port_in_use 5173; then
     print_error "Port 5173 is already in use. Please stop the service using this port and try again."

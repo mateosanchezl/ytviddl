@@ -137,7 +137,7 @@ function App() {
         );
       }
     } catch (error) {
-      console.error("Error downloading video:", error);
+      console.error(error);
       setDownloadQueue((prev) =>
         prev.map((queueItem) =>
           queueItem.id === item.id
@@ -159,6 +159,32 @@ function App() {
     setDownloadQueue((prev) => prev.filter((item) => item.id !== id));
   };
 
+  const cancelDownload = async (id: string) => {
+    try {
+      await fetch(`${API_BASE}/cancel/${id}`, {
+        method: "POST",
+      });
+
+      // Update the status to cancelled
+      setDownloadQueue((prev) =>
+        prev.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                status: {
+                  status: "error",
+                  progress: 0,
+                  message: "cancelled",
+                },
+              }
+            : item
+        )
+      );
+    } catch (error) {
+      console.error("Error cancelling download:", error);
+    }
+  };
+
   const clearCompleted = () => {
     setDownloadQueue((prev) =>
       prev.filter((item) => item.status.status !== "completed" && item.status.status !== "error")
@@ -169,6 +195,20 @@ function App() {
     if (e.key === "Enter") {
       addToQueue();
     }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    console.log(e);
+    // Small delay to ensure the pasted content is in the input
+    setTimeout(() => {
+      const pastedValue = (e.target as HTMLInputElement).value;
+      if (
+        pastedValue.trim() &&
+        (pastedValue.includes("youtube.com") || pastedValue.includes("youtu.be"))
+      ) {
+        addToQueue();
+      }
+    }, 10);
   };
 
   return (
@@ -235,6 +275,7 @@ function App() {
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               onKeyPress={handleKeyPress}
+              onPaste={handlePaste}
               placeholder="paste youtube url..."
               style={{
                 flex: 1,
@@ -365,20 +406,38 @@ function App() {
                     >
                       {item.url}
                     </div>
-                    <button
-                      onClick={() => removeFromQueue(item.id)}
-                      style={{
-                        padding: "4px 8px",
-                        backgroundColor: "transparent",
-                        color: "#666666",
-                        border: "none",
-                        borderRadius: "2px",
-                        cursor: "pointer",
-                        fontSize: "10px",
-                      }}
-                    >
-                      ×
-                    </button>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      {item.status.status === "downloading" && (
+                        <button
+                          onClick={() => cancelDownload(item.id)}
+                          style={{
+                            padding: "4px 8px",
+                            backgroundColor: "transparent",
+                            color: "#ff6b6b",
+                            border: "none",
+                            borderRadius: "2px",
+                            cursor: "pointer",
+                            fontSize: "10px",
+                          }}
+                        >
+                          cancel
+                        </button>
+                      )}
+                      <button
+                        onClick={() => removeFromQueue(item.id)}
+                        style={{
+                          padding: "4px 8px",
+                          backgroundColor: "transparent",
+                          color: "#666666",
+                          border: "none",
+                          borderRadius: "2px",
+                          cursor: "pointer",
+                          fontSize: "10px",
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
                   </div>
 
                   <div

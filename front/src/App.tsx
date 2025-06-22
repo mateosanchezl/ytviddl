@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import "./App.css";
 
 interface DownloadStatus {
   status: "downloading" | "completed" | "error" | "not_found";
@@ -13,15 +12,19 @@ interface Video {
   size_mb: number;
 }
 
+interface QueueItem {
+  id: string;
+  url: string;
+  status: DownloadStatus;
+}
+
 function App() {
   const [url, setUrl] = useState("");
   const [downloadPath, setDownloadPath] = useState("./vids");
-  const [downloadId, setDownloadId] = useState<string | null>(null);
-  const [downloadStatus, setDownloadStatus] = useState<DownloadStatus | null>(null);
+  const [downloadQueue, setDownloadQueue] = useState<QueueItem[]>([]);
   const [videos, setVideos] = useState<Video[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
 
-  const API_BASE = "http://localhost:5000/api";
+  const API_BASE = "http://127.0.0.1:5000/api";
 
   // Fetch videos list
   const fetchVideos = async () => {
@@ -34,44 +37,68 @@ function App() {
     }
   };
 
-  // Check download status
+  // Check download status for a specific item
   const checkDownloadStatus = async (id: string) => {
     try {
       const response = await fetch(`${API_BASE}/status/${id}`);
       const status = await response.json();
-      setDownloadStatus(status);
+
+      setDownloadQueue((prev) => prev.map((item) => (item.id === id ? { ...item, status } : item)));
 
       if (status.status === "completed" || status.status === "error") {
-        setDownloadId(null);
-        fetchVideos(); // Refresh video list
+        fetchVideos();
       }
     } catch (error) {
       console.error("Error checking download status:", error);
     }
   };
 
-  // Poll download status
+  // Poll download status for all active downloads
   useEffect(() => {
-    if (downloadId) {
+    const activeDownloads = downloadQueue.filter((item) => item.status.status === "downloading");
+
+    if (activeDownloads.length > 0) {
       const interval = setInterval(() => {
-        checkDownloadStatus(downloadId);
+        activeDownloads.forEach((item) => {
+          checkDownloadStatus(item.id);
+        });
       }, 1000);
       return () => clearInterval(interval);
     }
-  }, [downloadId]);
+  }, [downloadQueue]);
 
   // Initial fetch
   useEffect(() => {
     fetchVideos();
   }, []);
 
-  const handleDownload = async () => {
-    if (!url.trim()) {
-      alert("Please enter a YouTube URL");
+  const addToQueue = () => {
+    const trimmedUrl = url.trim();
+    if (!trimmedUrl) return;
+
+    // Check if URL already exists in queue
+    const exists = downloadQueue.some((item) => item.url === trimmedUrl);
+    if (exists) {
+      setUrl("");
       return;
     }
 
-    setIsLoading(true);
+    const newItem: QueueItem = {
+      id: Date.now().toString(),
+      url: trimmedUrl,
+      status: {
+        status: "downloading",
+        progress: 0,
+        message: "queued...",
+      },
+    };
+
+    setDownloadQueue((prev) => [...prev, newItem]);
+    setUrl("");
+    startDownload(newItem);
+  };
+
+  const startDownload = async (item: QueueItem) => {
     try {
       const response = await fetch(`${API_BASE}/download`, {
         method: "POST",
@@ -79,7 +106,7 @@ function App() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          url: url.trim(),
+          url: item.url,
           output_path: downloadPath,
         }),
       });
@@ -87,111 +114,411 @@ function App() {
       const data = await response.json();
 
       if (response.ok) {
-        setDownloadId(data.download_id);
-        setUrl(""); // Clear URL after successful start
+        // Update the queue item with the actual download ID
+        setDownloadQueue((prev) =>
+          prev.map((queueItem) =>
+            queueItem.id === item.id ? { ...queueItem, id: data.download_id } : queueItem
+          )
+        );
       } else {
-        alert(data.error || "Failed to start download");
+        setDownloadQueue((prev) =>
+          prev.map((queueItem) =>
+            queueItem.id === item.id
+              ? {
+                  ...queueItem,
+                  status: {
+                    status: "error",
+                    progress: 0,
+                    message: data.error || "failed to start download",
+                  },
+                }
+              : queueItem
+          )
+        );
       }
     } catch (error) {
-      alert("Error connecting to server. Make sure the Python API is running.");
-    } finally {
-      setIsLoading(false);
+      console.error("Error downloading video:", error);
+      setDownloadQueue((prev) =>
+        prev.map((queueItem) =>
+          queueItem.id === item.id
+            ? {
+                ...queueItem,
+                status: {
+                  status: "error",
+                  progress: 0,
+                  message: "connection error",
+                },
+              }
+            : queueItem
+        )
+      );
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "downloading":
-        return "#f39c12";
-      case "completed":
-        return "#27ae60";
-      case "error":
-        return "#e74c3c";
-      default:
-        return "#95a5a6";
+  const removeFromQueue = (id: string) => {
+    setDownloadQueue((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const clearCompleted = () => {
+    setDownloadQueue((prev) =>
+      prev.filter((item) => item.status.status !== "completed" && item.status.status !== "error")
+    );
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      addToQueue();
     }
   };
 
   return (
-    <div className="app">
-      <div className="container">
-        <header className="header">
-          <h1>🎥 YouTube Video Downloader</h1>
-          <p>Download YouTube videos with high quality</p>
-        </header>
+    <div
+      style={{
+        minHeight: "100vh",
+        backgroundColor: "#000000",
+        color: "#ffffff",
+        fontFamily: "system-ui, -apple-system, sans-serif",
+        fontSize: "14px",
+        fontWeight: "300",
+      }}
+    >
+      <div
+        style={{
+          maxWidth: "600px",
+          margin: "0 auto",
+          padding: "60px 20px",
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            textAlign: "center",
+            marginBottom: "60px",
+          }}
+        >
+          <h1
+            style={{
+              fontSize: "24px",
+              fontWeight: "200",
+              margin: "0 0 8px 0",
+              letterSpacing: "1px",
+            }}
+          >
+            youtube downloader
+          </h1>
+          <p
+            style={{
+              color: "#666666",
+              margin: "0",
+              fontSize: "12px",
+            }}
+          >
+            paste. download. done.
+          </p>
+        </div>
 
-        <div className="download-section">
-          <div className="input-group">
-            <label htmlFor="url">YouTube URL:</label>
+        {/* Input Section */}
+        <div
+          style={{
+            marginBottom: "40px",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              gap: "12px",
+              marginBottom: "16px",
+            }}
+          >
             <input
-              id="url"
               type="text"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://www.youtube.com/watch?v=..."
-              disabled={isLoading}
+              onKeyPress={handleKeyPress}
+              placeholder="paste youtube url..."
+              style={{
+                flex: 1,
+                padding: "12px 16px",
+                backgroundColor: "#111111",
+                border: "1px solid #333333",
+                borderRadius: "4px",
+                color: "#ffffff",
+                fontSize: "14px",
+                outline: "none",
+                transition: "border-color 0.2s",
+              }}
+              onFocus={(e) => (e.target.style.borderColor = "#555555")}
+              onBlur={(e) => (e.target.style.borderColor = "#333333")}
             />
+            <button
+              onClick={addToQueue}
+              disabled={!url.trim()}
+              style={{
+                padding: "12px 20px",
+                backgroundColor: url.trim() ? "#ffffff" : "#222222",
+                color: url.trim() ? "#000000" : "#666666",
+                border: "none",
+                borderRadius: "4px",
+                cursor: url.trim() ? "pointer" : "not-allowed",
+                fontSize: "14px",
+                fontWeight: "400",
+                transition: "all 0.2s",
+              }}
+            >
+              add
+            </button>
           </div>
 
-          <div className="input-group">
-            <label htmlFor="path">Download Path:</label>
-            <input
-              id="path"
-              type="text"
-              value={downloadPath}
-              onChange={(e) => setDownloadPath(e.target.value)}
-              placeholder="./vids"
-              disabled={isLoading}
-            />
-          </div>
-
-          <button
-            onClick={handleDownload}
-            disabled={isLoading || !url.trim()}
-            className="download-btn"
-          >
-            {isLoading ? "Starting Download..." : "Download Video"}
-          </button>
+          <input
+            type="text"
+            value={downloadPath}
+            onChange={(e) => setDownloadPath(e.target.value)}
+            placeholder="download path..."
+            style={{
+              width: "100%",
+              padding: "8px 16px",
+              backgroundColor: "#111111",
+              border: "1px solid #222222",
+              borderRadius: "4px",
+              color: "#888888",
+              fontSize: "12px",
+              outline: "none",
+              boxSizing: "border-box",
+            }}
+          />
         </div>
 
-        {downloadStatus && (
-          <div className="status-section">
-            <h3>Download Status</h3>
+        {/* Download Queue */}
+        {downloadQueue.length > 0 && (
+          <div
+            style={{
+              marginBottom: "40px",
+            }}
+          >
             <div
-              className="status-indicator"
-              style={{ color: getStatusColor(downloadStatus.status) }}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "20px",
+              }}
             >
-              <div className="status-message">{downloadStatus.message}</div>
-              {downloadStatus.status === "downloading" && (
-                <div className="progress-bar">
+              <h3
+                style={{
+                  fontSize: "16px",
+                  fontWeight: "300",
+                  margin: "0",
+                  color: "#cccccc",
+                }}
+              >
+                download queue
+              </h3>
+              <button
+                onClick={clearCompleted}
+                style={{
+                  padding: "6px 12px",
+                  backgroundColor: "transparent",
+                  color: "#666666",
+                  border: "1px solid #333333",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  fontSize: "12px",
+                }}
+              >
+                clear completed
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "12px",
+              }}
+            >
+              {downloadQueue.map((item) => (
+                <div
+                  key={item.id}
+                  style={{
+                    padding: "16px",
+                    backgroundColor: "#111111",
+                    borderRadius: "4px",
+                    border: "1px solid #222222",
+                  }}
+                >
                   <div
-                    className="progress-fill"
-                    style={{ width: `${downloadStatus.progress}%` }}
-                  ></div>
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        flex: 1,
+                        fontSize: "12px",
+                        color: "#888888",
+                        wordBreak: "break-all",
+                        marginRight: "12px",
+                      }}
+                    >
+                      {item.url}
+                    </div>
+                    <button
+                      onClick={() => removeFromQueue(item.id)}
+                      style={{
+                        padding: "4px 8px",
+                        backgroundColor: "transparent",
+                        color: "#666666",
+                        border: "none",
+                        borderRadius: "2px",
+                        cursor: "pointer",
+                        fontSize: "10px",
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        color:
+                          item.status.status === "downloading"
+                            ? "#ffffff"
+                            : item.status.status === "completed"
+                            ? "#666666"
+                            : item.status.status === "error"
+                            ? "#ff6b6b"
+                            : "#888888",
+                      }}
+                    >
+                      {item.status.message}
+                    </div>
+
+                    {item.status.status === "downloading" && (
+                      <div
+                        style={{
+                          flex: 1,
+                          height: "2px",
+                          backgroundColor: "#222222",
+                          borderRadius: "1px",
+                          overflow: "hidden",
+                        }}
+                      >
+                        <div
+                          style={{
+                            height: "100%",
+                            backgroundColor: "#ffffff",
+                            width: `${item.status.progress}%`,
+                            transition: "width 0.3s ease",
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
+              ))}
             </div>
           </div>
         )}
 
-        <div className="videos-section">
-          <div className="section-header">
-            <h3>Downloaded Videos</h3>
-            <button onClick={fetchVideos} className="refresh-btn">
-              🔄 Refresh
+        {/* Downloaded Videos */}
+        <div>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "20px",
+            }}
+          >
+            <h3
+              style={{
+                fontSize: "16px",
+                fontWeight: "300",
+                margin: "0",
+                color: "#cccccc",
+              }}
+            >
+              downloaded videos
+            </h3>
+            <button
+              onClick={fetchVideos}
+              style={{
+                padding: "6px 12px",
+                backgroundColor: "transparent",
+                color: "#666666",
+                border: "1px solid #333333",
+                borderRadius: "4px",
+                cursor: "pointer",
+                fontSize: "12px",
+              }}
+            >
+              refresh
             </button>
           </div>
 
           {videos.length === 0 ? (
-            <p className="no-videos">No videos downloaded yet</p>
+            <p
+              style={{
+                color: "#666666",
+                textAlign: "center",
+                padding: "40px 0",
+                margin: "0",
+                fontSize: "12px",
+              }}
+            >
+              no videos yet
+            </p>
           ) : (
-            <div className="videos-list">
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+              }}
+            >
               {videos.map((video, index) => (
-                <div key={index} className="video-item">
-                  <div className="video-info">
-                    <span className="video-name">{video.filename}</span>
-                    <span className="video-size">{video.size_mb} MB</span>
-                  </div>
+                <div
+                  key={index}
+                  style={{
+                    padding: "12px 16px",
+                    backgroundColor: "#111111",
+                    borderRadius: "4px",
+                    border: "1px solid #222222",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "12px",
+                      color: "#cccccc",
+                      flex: 1,
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {video.filename}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "11px",
+                      color: "#666666",
+                      marginLeft: "12px",
+                    }}
+                  >
+                    {video.size_mb} mb
+                  </span>
                 </div>
               ))}
             </div>
